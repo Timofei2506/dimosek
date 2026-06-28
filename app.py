@@ -58,62 +58,66 @@ if prompt := st.chat_input("Напиши команду..."):
 # ==================== РЕЖИМ АГЕНТА ====================
 if mode == "Агент":
     st.divider()
-    st.subheader("🌐 Браузерный агент (с fallback)")
+    st.subheader("🌐 Браузерный агент")
 
-    st.caption("Пример: `зайди на lichess.org`, `сделай скриншот`, `нажми на Play`")
+    if "current_url" not in st.session_state:
+        st.session_state.current_url = None
 
-    # Функция для скриншотов через бесплатный сервис
-    def take_screenshot(url: str):
-        try:
-            # Используем бесплатный сервис ScreenshotOne (или можно заменить)
-            screenshot_url = f"https://shot.screenshotapi.net/screenshot?token=demo&url={url}&output=image&file_type=png"
-            return screenshot_url
-        except:
-            return None
+    # Функция получения скриншота (Thum.io — работает без ключа)
+    def get_screenshot(url: str):
+        if not url.startswith("http"):
+            url = "https://" + url
+        # Thum.io — один из самых стабильных бесплатных способов
+        return f"https://image.thum.io/get/width/1200/crop/800/fullpage/noanimate/{url}"
 
-    # Простой парсинг
-    def get_page_content(url: str):
+    # Функция парсинга страницы
+    def get_page_text(url: str):
         try:
             headers = {"User-Agent": "Mozilla/5.0"}
             resp = requests.get(url, headers=headers, timeout=10)
             soup = BeautifulSoup(resp.text, "html.parser")
-            return soup.get_text()[:2000]
+            return soup.get_text()[:2500]
         except Exception as e:
-            return f"Ошибка: {e}"
+            return f"Ошибка загрузки: {e}"
 
-    # UI
-    if "browser_history" not in st.session_state:
-        st.session_state.browser_history = []
+    # === ВВОД КОМАНДЫ ===
+    action = st.text_input(
+        "Команда агенту", 
+        placeholder="зайди на lichess.org и сделай скриншот"
+    )
 
-    col1, col2 = st.columns([3, 1])
+    if st.button("Выполнить команду", type="primary"):
+        if action:
+            st.session_state.messages.append({"role": "user", "content": action})
 
-    with col1:
-        action = st.text_input("Команда агенту", placeholder="зайди на lichess.org и сделай скриншот")
+            with st.chat_message("assistant"):
+                with st.spinner("Выполняю..."):
 
-    with col2:
-        if st.button("Выполнить"):
-            if action:
-                st.session_state.browser_history.append(action)
-                st.write(f"**Выполняю:** {action}")
+                    lower_action = action.lower()
 
-                # Простая логика
-                if "зайди на" in action.lower() or "открой" in action.lower():
-                    url = action.split()[-1]
-                    st.session_state.current_url = url
-                    st.success(f"Открыл: {url}")
+                    # === Логика команд ===
+                    if "зайди на" in lower_action or "открой" in lower_action:
+                        # Извлекаем ссылку
+                        words = action.split()
+                        for word in words:
+                            if "http" in word or "." in word:
+                                url = word.replace("https://", "").replace("http://", "")
+                                st.session_state.current_url = "https://" + url
+                                break
+                        
+                        if st.session_state.current_url:
+                            st.success(f"Открыл сайт: {st.session_state.current_url}")
+                            
+                            # Показываем скриншот
+                            screenshot_url = get_screenshot(st.session_state.current_url)
+                            st.image(screenshot_url, caption="Скриншот страницы", use_column_width=True)
 
-                    # Показываем скриншот
-                    screenshot = take_screenshot(url)
-                    if screenshot:
-                        st.image(screenshot, caption="Скриншот страницы")
+                    elif "скриншот" in lower_action:
+                        if st.session_state.current_url:
+                            screenshot_url = get_screenshot(st.session_state.current_url)
+                            st.image(screenshot_url, caption="Скриншот", use_column_width=True)
+                        else:
+                            st.warning("Сначала открой сайт")
 
-                elif "скриншот" in action.lower():
-                    if "current_url" in st.session_state:
-                        screenshot = take_screenshot(st.session_state.current_url)
-                        if screenshot:
-                            st.image(screenshot)
                     else:
-                        st.warning("Сначала открой сайт")
-
-                else:
-                    st.info("Команда обработана (пока упрощённо)")
+                        st.info("Команда обработана. Можно продолжать.")
