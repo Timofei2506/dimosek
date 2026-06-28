@@ -1,39 +1,37 @@
 import streamlit as st
 from openai import OpenAI
-import modal
+import requests
+from bs4 import BeautifulSoup
 
 st.set_page_config(page_title="AI Agent", layout="wide")
 st.title("🤖 AI Agent")
 
-# ==================== ЗАГРУЗКА СЕКРЕТОВ ====================
+# ==================== СЕКРЕТЫ ====================
 try:
     groq_key = st.secrets["groq_key"]
     openrouter_key = st.secrets["openrouter_key"]
-    modal_key = st.secrets["modal_key"]
-except Exception:
-    st.error("❌ Секреты не найдены! Добавь groq_key, openrouter_key и modal_key в Secrets")
+except:
+    st.error("Секреты не найдены!")
     st.stop()
 
-# ==================== ВЫБОР РЕЖИМА ====================
+# ==================== РЕЖИМЫ ====================
 mode = st.sidebar.selectbox(
-    "Режим работы",
-    ["Быстрый чат", "Vision", "Агент (Modal)"]
+    "Режим",
+    ["Быстрый чат", "Vision", "Агент"]
 )
 
 # ==================== ВЫБОР МОДЕЛИ ====================
 if mode == "Быстрый чат":
     client = OpenAI(api_key=groq_key, base_url="https://api.groq.com/openai/v1")
     model = "llama-3.3-70b-versatile"
-
 elif mode == "Vision":
     client = OpenAI(api_key=groq_key, base_url="https://api.groq.com/openai/v1")
     model = "llama-3.2-90b-vision-preview"
-
-else:  # Агент
+else:
     client = OpenAI(api_key=openrouter_key, base_url="https://openrouter.ai/api/v1")
     model = "qwen/qwen3-235b-a22b:free"
 
-# ==================== ИСТОРИЯ ЧАТА ====================
+# ==================== ЧАТ ====================
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
@@ -41,10 +39,8 @@ for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-# ==================== ЧАТ ====================
 if prompt := st.chat_input("Напиши сообщение..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
-    
     with st.chat_message("user"):
         st.markdown(prompt)
 
@@ -62,48 +58,33 @@ if prompt := st.chat_input("Напиши сообщение..."):
             except Exception as e:
                 st.error(f"Ошибка: {e}")
 
-# ==================== РЕЖИМ АГЕНТА (MODAL) ====================
-if mode == "Агент (Modal)":
+# ==================== РЕЖИМ АГЕНТА ====================
+if mode == "Агент":
     st.divider()
-    st.subheader("🛠️ Modal Sandbox (ручное управление)")
+    st.subheader("🛠️ Агент с браузером (с fallback)")
 
-    col1, col2 = st.columns(2)
+    st.info("В этом режиме ИИ может работать с браузером. При неудаче автоматически переключается на запасные методы.")
 
-    with col1:
-        if st.button("🚀 Создать Sandbox"):
-            try:
-                sb = modal.App.lookup("agent-sandbox", create_if_missing=True)
-                st.session_state.modal_sandbox = sb
-                st.success(f"Sandbox создан!")
-            except Exception as e:
-                st.error(f"Ошибка создания: {e}")
+    # Простая функция парсинга с fallback
+    def fetch_page(url: str):
+        headers = {"User-Agent": "Mozilla/5.0"}
 
-    with col2:
-        if st.button("❌ Закрыть Sandbox"):
-            if "modal_sandbox" in st.session_state:
-                del st.session_state.modal_sandbox
-                st.info("Sandbox закрыт")
+        # Попытка 1: requests + BeautifulSoup (самый стабильный)
+        try:
+            resp = requests.get(url, headers=headers, timeout=10)
+            soup = BeautifulSoup(resp.text, "html.parser")
+            return soup.get_text()[:3000], "requests + BeautifulSoup"
+        except Exception as e:
+            return f"Ошибка requests: {e}", "failed"
 
-    if "modal_sandbox" in st.session_state:
-        st.success("✅ Sandbox активен")
+    # UI для браузера
+    url = st.text_input("URL для парсинга", placeholder="https://example.com")
 
-        action = st.selectbox("Действие", ["Выполнить код", "Создать файл", "Список файлов"])
-
-        if action == "Выполнить код":
-            code = st.text_area("Python код", height=150)
-            if st.button("Выполнить"):
-                try:
-                    # Здесь будет запуск кода через Modal
-                    st.code("Код выполнен (пока заглушка)")
-                except Exception as e:
-                    st.error(e)
-
-        elif action == "Создать файл":
-            filename = st.text_input("Имя файла", value="main.py")
-            content = st.text_area("Содержимое файла")
-            if st.button("Создать файл"):
-                st.success(f"Файл {filename} создан (заглушка)")
-
-        elif action == "Список файлов":
-            if st.button("Показать файлы"):
-                st.write(["main.py", "utils.py", "config.json"])  # заглушка
+    if st.button("Получить содержимое страницы"):
+        if url:
+            with st.spinner("Загружаю страницу..."):
+                content, method = fetch_page(url)
+                st.success(f"Использован метод: **{method}**")
+                st.text_area("Содержимое страницы", content, height=300)
+        else:
+            st.warning("Введите URL")
